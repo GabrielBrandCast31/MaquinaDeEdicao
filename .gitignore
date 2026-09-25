@@ -5,3 +5,17 @@ dist
 
 # Ignore the output video from Git but not videos you import into src/.
 out
+whisper.cpp/
+out/
+scripts/*.wav
+origins/
+public/video/
+scripts/chunks/
+scripts/*.json
+
+# Lab de Edição: vídeos, análises e renders locais
+lab/data/
+lab/render-public/
+# Cenas de motion geradas pela IA (por projeto) e o registro gerado
+src/lab/motion/*
+!src/lab/motion/GUIDE.md
