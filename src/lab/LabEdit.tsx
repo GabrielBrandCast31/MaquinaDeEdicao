@@ -173,7 +173,12 @@ const Captions: React.FC<{spec: EditSpec; hidden: (f: number) => boolean}> = ({s
   const cap = spec.captions.find((c) => f >= c.a && f < c.b);
   if (!cap) return null;
   const unit = Math.min(spec.width, spec.height);
-  const size = (cs.sizePct / 100) * unit;
+  const words = spec.words.slice(cap.w0, cap.w1 + 1);
+  // Shrink when the longest word would not fit the safe width (≈0.62 em per char, wider in caps).
+  const base = (cs.sizePct / 100) * unit;
+  const longest = Math.max(1, ...words.map((w) => w.t.replace(/[,.;:!?]+$/, '').length));
+  const safe = spec.width * 0.84 - (cs.box.enabled ? base * 0.8 : 0);
+  const size = Math.min(base, safe / (longest * (cs.uppercase ? 0.7 : 0.6)));
   const family = fontFamily(cs.font, cs.weight);
   const local = f - cap.a;
   const inT = cs.animation === 'none' ? 1 : interpolate(local, [0, cs.animation === 'bounce' ? 9 : 6], [0, 1], {...clamp, easing: cs.animation === 'bounce' ? Easing.bezier(0.34, 1.8, 0.64, 1) : easeOut});
@@ -181,7 +186,6 @@ const Captions: React.FC<{spec: EditSpec; hidden: (f: number) => boolean}> = ({s
     cs.animation === 'pop' || cs.animation === 'bounce' ? {scale: String(0.75 + 0.25 * inT), opacity: Math.min(1, inT * 2)} :
     cs.animation === 'slide-up' ? {translate: `0 ${(1 - inT) * size * 0.6}px`, opacity: inT} :
     cs.animation === 'fade' ? {opacity: inT} : {};
-  const words = spec.words.slice(cap.w0, cap.w1 + 1);
   const strokePx = cs.strokeWidth * (size / 60);
   const boxRgba = hexToRgba(cs.box.color, cs.box.opacity);
 
@@ -217,10 +221,10 @@ const Captions: React.FC<{spec: EditSpec; hidden: (f: number) => boolean}> = ({s
   );
 };
 
-const Callouts: React.FC<{spec: EditSpec}> = ({spec}) => {
+const Callouts: React.FC<{spec: EditSpec; hidden: (f: number) => boolean}> = ({spec, hidden}) => {
   const f = useCurrentFrame();
   const cs = spec.style.callouts;
-  if (!cs.enabled) return null;
+  if (!cs.enabled || hidden(f)) return null;
   const c = spec.callouts.find((x) => f >= x.f && f < x.f + x.dur);
   if (!c) return null;
   const local = f - c.f;
@@ -247,7 +251,7 @@ const Callouts: React.FC<{spec: EditSpec}> = ({spec}) => {
   }
   return (
     <AbsoluteFill style={{pointerEvents: 'none', justifyContent: 'center', alignItems: 'center', background: `rgba(0,0,0,${0.45 * Math.min(inT, outT)})`}}>
-      <div style={{scale: String(0.6 + 0.4 * inT), opacity: outT, color: cs.color, fontFamily: family, fontWeight: 800, fontSize: unit * 0.11, lineHeight: 1, textAlign: 'center', textTransform: 'uppercase', maxWidth: spec.width * 0.86, textShadow: `0 0 ${unit * 0.05}px ${cs.accentColor}, 0 ${unit * 0.01}px ${unit * 0.04}px rgba(0,0,0,0.7)`}}>{c.text}</div>
+      <div style={{scale: String(0.6 + 0.4 * inT), opacity: outT, color: cs.color, fontFamily: family, fontWeight: 800, fontSize: Math.min(unit * 0.11, (spec.width * 0.84) / (0.72 * Math.max(1, ...c.text.split(/\s+/).map((w) => w.length)))), lineHeight: 1, textAlign: 'center', textTransform: 'uppercase', maxWidth: spec.width * 0.86, textShadow: `0 0 ${unit * 0.05}px ${cs.accentColor}, 0 ${unit * 0.01}px ${unit * 0.04}px rgba(0,0,0,0.7)`}}>{c.text}</div>
     </AbsoluteFill>
   );
 };
@@ -321,8 +325,9 @@ export const LabEdit: React.FC<LabProps> = ({spec, base}) => {
   const placed = useMemo(() => (spec ? placeScenes(spec) : []), [spec]);
   if (!spec) return <Empty />;
   const bold = spec.style.callouts.enabled && spec.style.callouts.style === 'bold-center';
+  const inScene = (f: number) => placed.some((p) => f >= p.from && f < p.from + p.dur);
   const hideCaptions = (f: number) =>
-    (bold && spec.callouts.some((c) => f >= c.f && f < c.f + c.dur)) ||
+    (bold && !inScene(f) && spec.callouts.some((c) => f >= c.f && f < c.f + c.dur)) ||
     placed.some((p) => p.scene.hideCaptions && f >= p.from && f < p.from + p.dur);
   return (
     <LabBase.Provider value={base ?? ''}>
@@ -332,7 +337,7 @@ export const LabEdit: React.FC<LabProps> = ({spec, base}) => {
         <Grade style={spec.style} />
         <Flash spec={spec} />
         <SceneLayer spec={spec} placed={placed} layer="over" />
-        <Callouts spec={spec} />
+        <Callouts spec={spec} hidden={inScene} />
         <Captions spec={spec} hidden={hideCaptions} />
         <ProgressBar spec={spec} />
         <Sound spec={spec} base={base} />

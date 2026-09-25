@@ -38,6 +38,7 @@ export const JobPanel: React.FC<{job: Job | null}> = ({job}) => {
         {job.status === 'running' ? <span className="spinner" /> : <span className="job-dot" />}
         <strong>{job.status === 'error' ? 'Falhou' : job.status === 'done' ? 'Concluído' : job.step || 'Iniciando…'}</strong>
         <span className="muted mono">{secs}s{job.costUsd ? ` · IA ${fmtUsd(job.costUsd)}` : ''}</span>
+        {job.status === 'running' && <button className="btn btn-sm btn-ghost" onClick={() => api.post(`/api/jobs/${job.id}/cancel`)}>Cancelar</button>}
       </div>
       {job.status === 'running' && (
         <div className={`bar ${job.progress == null ? 'bar-indeterminate' : ''}`}><div style={{width: `${Math.round((job.progress ?? 0.3) * 100)}%`}} /></div>

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {askClaude} from './ai.mjs';
-import {extractWav, fileExists, makeProxy, probe, run, silences, still, transcribe} from './media.mjs';
+import {extractWav, fileExists, fingerprint, makeProxy, probe, run, silences, still, transcribe} from './media.mjs';
+import {clearMotion} from './motion.mjs';
 import {sanitizePlan, sanitizeStyle} from './sanitize.mjs';
 import {ASPECTS, PLAN_SCHEMA, REFINE_SCHEMA} from './schemas.mjs';
 import {DATA, dirOf, getMeta, mediaUrl, readJson, ROOT, saveMeta, writeJson} from './store.mjs';
@@ -28,11 +29,15 @@ export const prepareRaw = async (id, {language}, job) => {
   job.step('Lendo o bruto');
   const info = await probe(meta.source);
   job.log(`${info.width}×${info.height} · ${info.duration.toFixed(1)} s`);
-  if (!fileExists(f.raw) || meta.proxyOf !== meta.source) {
+  const fp = fingerprint(meta.source);
+  if (!fileExists(f.raw) || meta.proxyOf !== fp) {
+    // New footage: everything derived from the old one (transcript indices, plan, motion) is invalid.
+    for (const k of ['raw', 'words', 'silences', 'still', 'info', 'plan', 'spec']) fs.rmSync(f[k], {force: true});
+    clearMotion(id);
+    saveMeta('project', id, {built: false, chat: [], sample: {startSec: 0, lenSec: meta.sample?.lenSec ?? 15}, stage: 'sampling', finalUrl: null});
     job.step('Gerando proxy do bruto');
     await makeProxy(meta.source, f.raw, {fps: 30, duration: info.duration, onProgress: (p) => job.progress(p)});
-    for (const k of ['words', 'silences']) fs.rmSync(f[k], {force: true});
-    saveMeta('project', id, {proxyOf: meta.source, video: mediaUrl(f.raw)});
+    saveMeta('project', id, {proxyOf: fp, video: mediaUrl(f.raw)});
   }
   const pInfo = await probe(f.raw);
   writeJson(f.info, pInfo);

@@ -101,7 +101,10 @@ export const Pipeline: React.FC<Props> = ({d, running, start, model, language, o
             <p className="muted small">Cortes, legendas{enabled ? ', motion' : ''} e som exatamente como vão ficar. Aprovando, a IA faz o resto do vídeo na mesma linguagem e renderiza o MP4 completo.</p>
             {stage === 'sample-ready' && (
               <>
-                <button className="btn btn-primary" disabled={running} onClick={() => start(`/api/projects/${id}/approve`, {model})}>Aprovar e fazer o resto →</button>
+                <div className="row-gap">
+                  <button className="btn btn-primary" disabled={running} onClick={() => start(`/api/projects/${id}/approve`, {model})}>Aprovar e fazer o resto →</button>
+                  <button className="btn btn-sm" disabled={running} title="Renderiza a amostra de novo com os ajustes atuais (controles, chat), sem gastar IA" onClick={() => start(`/api/projects/${id}/render`, {sampleOnly: true})}>Re-renderizar amostra</button>
+                </div>
                 <div className="feedback">
                   <textarea rows={3} placeholder="Não gostou? Diga o que mudar (ex: motion mais limpo, legenda menor, zoom mais suave) e refaça só a amostra." value={feedback} onChange={(e) => setFeedback(e.target.value)} />
                   <button className="btn" disabled={running || !feedback.trim()} onClick={() => { generate({feedback}); setFeedback(''); }}>Refazer amostra com ajuste</button>

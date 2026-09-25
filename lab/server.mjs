@@ -6,6 +6,7 @@ import http from 'node:http';
 import path from 'node:path';
 import {analyzeReference} from './lib/analyze.mjs';
 import {buildSpec, listRenders, loadProject, planWithAi, prepareRaw, projectFiles, refineWithAi, renderProject} from './lib/edit.mjs';
+import {jobCtx} from './lib/jobctx.mjs';
 import {clearMotion, generateMotion, removeMotion, writeRegistry} from './lib/motion.mjs';
 import {sanitizePlan, sanitizeStyle} from './lib/sanitize.mjs';
 import {DEFAULT_STYLE} from './lib/schemas.mjs';
@@ -16,6 +17,7 @@ const PUBLIC = path.join(ROOT, 'public');
 
 // ---------- jobs ----------
 const jobs = new Map();
+const controls = new Map(); // job id -> {cancelled, children}
 const startJob = (kind, target, fn) => {
   for (const j of jobs.values()) if (j.target === target && j.status === 'running') throw Object.assign(new Error('Já existe uma tarefa rodando para este item'), {status: 409});
   const job = {id: newId(kind), kind, target, status: 'running', step: '', log: [], progress: null, costUsd: 0, startedAt: Date.now(), result: null, error: null};
@@ -33,10 +35,22 @@ const startJob = (kind, target, fn) => {
     },
   };
   saveMeta(entity, id, {job: job.id});
-  fn(api).then(
+  const ctl = {cancelled: false, children: new Set()};
+  controls.set(job.id, ctl);
+  const guarded = async () => {
+    const r = await fn(api);
+    if (ctl.cancelled) throw new Error('Cancelado');
+    return r;
+  };
+  jobCtx.run(ctl, guarded).then(
     (r) => { job.status = 'done'; job.result = r ?? null; job.progress = 1; push('✓ Concluído'); },
-    (e) => { job.status = 'error'; job.error = e.message; push(`✗ ${e.message}`); console.error(e); },
-  ).finally(() => { job.endedAt = Date.now(); });
+    (e) => {
+      job.status = 'error';
+      job.error = ctl.cancelled ? 'Cancelado por você' : e.message;
+      push(`✗ ${job.error}`);
+      if (!ctl.cancelled) console.error(e);
+    },
+  ).finally(() => { job.endedAt = Date.now(); controls.delete(job.id); });
   return job;
 };
 
@@ -129,6 +143,13 @@ let studio = null;
 const routes = [
   ['GET', /^\/api\/state$/, () => ({styles: list('style'), projects: list('project'), music: musicLibrary(), running: [...jobs.values()].filter((j) => j.status === 'running').map((j) => ({id: j.id, target: j.target, step: j.step}))})],
   ['GET', /^\/api\/jobs\/([\w-]+)$/, (m) => jobs.get(m[1]) ?? Promise.reject(Object.assign(new Error('tarefa não encontrada'), {status: 404}))],
+  ['POST', /^\/api\/jobs\/([\w-]+)\/cancel$/, (m) => {
+    const ctl = controls.get(m[1]);
+    if (!ctl) return {ok: false};
+    ctl.cancelled = true;
+    for (const c of ctl.children) c.kill('SIGTERM');
+    return {ok: true};
+  }],
   ['GET', /^\/api\/current-spec$/, () => readJson(path.join(DATA, 'current-spec.json'))],
 
   // styles (reference videos)
@@ -304,7 +325,18 @@ const routes = [
     rebuildIfPossible(m[1]);
     return projectDetail(m[1]);
   }],
-  ['POST', /^\/api\/projects\/([\w-]+)\/render$/, (m) => startJob('render', `project:${m[1]}`, (job) => renderProject(m[1], {port: PORT}, job))],
+  ['POST', /^\/api\/projects\/([\w-]+)\/render$/, async (m, req) => {
+    const {sampleOnly = false} = await readBody(req);
+    const id = m[1];
+    const sample = getMeta('project', id)?.sample;
+    if (!sampleOnly) return startJob('render', `project:${id}`, (job) => renderProject(id, {port: PORT}, job));
+    if (sample?.to === undefined) throw Object.assign(new Error('Ainda não há amostra'), {status: 400});
+    // Re-renders the approved window with the current style/plan/motion — no AI calls.
+    return startJob('render', `project:${id}`, async (job) => {
+      const url = await renderProject(id, {port: PORT, frames: [sample.from, sample.to], label: 'amostra-'}, job);
+      saveMeta('project', id, {sample: {...sample, url}});
+    });
+  }],
   ['POST', /^\/api\/projects\/([\w-]+)\/open-studio$/, (m) => {
     const spec = readJson(projectFiles(m[1]).spec);
     if (spec) writeJson(path.join(DATA, 'current-spec.json'), spec);

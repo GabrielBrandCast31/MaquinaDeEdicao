@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import {track} from './jobctx.mjs';
 
 /**
  * Asks Claude through the local `claude` CLI (your Claude Code login — no API key needed).
@@ -15,6 +16,7 @@ export const askClaude = ({prompt, schema, cwd, model = 'sonnet', system, onLine
       '--system-prompt', system ?? 'Você é um editor de vídeo sênior especializado em conteúdo para redes sociais e VSLs. Analise com precisão e responda sempre em português do Brasil.',
     ];
     const p = spawn('claude', args, {cwd, stdio: ['pipe', 'pipe', 'pipe']});
+    track(p);
     let out = '', err = '';
     const timer = setTimeout(() => { p.kill('SIGTERM'); reject(new Error('Claude demorou demais (timeout)')); }, timeoutMs);
     p.stdout.on('data', (b) => { out += b; });

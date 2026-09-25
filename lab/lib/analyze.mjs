@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {askClaude} from './ai.mjs';
-import {contactSheet, extractWav, fileExists, loudness, makeProxy, probe, sceneCuts, silences, still, transcribe} from './media.mjs';
+import {contactSheet, extractWav, fileExists, fingerprint, loudness, makeProxy, probe, sceneCuts, silences, still, transcribe} from './media.mjs';
 import {sanitizeStyle} from './sanitize.mjs';
 import {ASPECTS, STYLE_SCHEMA} from './schemas.mjs';
 import {dirOf, getMeta, mediaUrl, readJson, saveMeta, writeJson} from './store.mjs';
@@ -46,10 +46,12 @@ export const analyzeReference = async (id, {model, language}, job) => {
   const info = await probe(meta.source);
   job.log(`${info.width}×${info.height} · ${info.fps.toFixed(2)} fps · ${info.duration.toFixed(1)} s`);
 
-  if (!fileExists(refPath) || meta.proxyOf !== meta.source) {
+  const fp = fingerprint(meta.source);
+  if (!fileExists(refPath) || meta.proxyOf !== fp) {
+    fs.rmSync(path.join(dir, 'words.json'), {force: true});
     job.step('Gerando proxy');
     await makeProxy(meta.source, refPath, {fps: 30, duration: info.duration, onProgress: (p) => job.progress(p)});
-    saveMeta('style', id, {proxyOf: meta.source, video: mediaUrl(refPath)});
+    saveMeta('style', id, {proxyOf: fp, video: mediaUrl(refPath)});
   }
 
   job.step('Transcrevendo fala (Whisper)');

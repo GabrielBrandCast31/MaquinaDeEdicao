@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {toCaptions, transcribe as whisper} from '@remotion/install-whisper-cpp';
+import {track} from './jobctx.mjs';
 import {ROOT} from './store.mjs';
 
 const WHISPER_PATH = path.join(ROOT, 'whisper.cpp');
@@ -11,6 +12,7 @@ const WHISPER_MODEL = 'large-v3-turbo';
 export const run = (cmd, args, {onLine, allowFail = false, cwd = ROOT, input} = {}) =>
   new Promise((resolve, reject) => {
     const p = spawn(cmd, args, {cwd, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']});
+    track(p);
     let out = '', err = '';
     const feed = (buf, isErr) => {
       const s = buf.toString();
@@ -99,6 +101,12 @@ export const contactSheet = async (input, {start, step, cols, rows, width = 360,
   const count = cols * rows;
   await run('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-i', input, '-vf', `fps=${(1 / step).toFixed(4)},scale=${width}:-2,tile=${cols}x${rows}:padding=4:color=white`, '-frames:v', '1', '-q:v', '3', output]);
   return Array.from({length: count}, (_, i) => +(start + i * step).toFixed(2));
+};
+
+/** Identity of a source file: re-uploads reuse the same path, so size + mtime decide if caches are stale. */
+export const fingerprint = (p) => {
+  const st = fs.statSync(p);
+  return `${p}|${st.size}|${Math.round(st.mtimeMs)}`;
 };
 
 export const fileExists = (p) => {
