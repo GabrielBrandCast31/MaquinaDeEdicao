@@ -3,11 +3,12 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {LabEdit} from '../../src/lab/LabEdit';
 import type {LabProps, StyleProfile} from '../../src/lab/types';
 import {api, fmtMb, fmtSec, fmtUsd, type ProjectDetail, type State} from './api';
-import {EditableTitle, JobPanel, SourcePicker, Stat, Tabs, useJob} from './components';
+import {BriefView} from './BriefView';
+import {EditableTitle, EffectsList, JobPanel, SourcePicker, Stat, Tabs, useJob} from './components';
 import {Pipeline} from './Pipeline';
 import {StyleEditor} from './StyleEditor';
 
-type Tab = 'ai' | 'style' | 'plan' | 'export';
+type Tab = 'ai' | 'brief' | 'style' | 'plan' | 'export';
 
 export const ProjectView: React.FC<{id: string; state: State; model: string; language: string; onChanged: () => void}> = ({id, state, model, language, onChanged}) => {
   const [d, setD] = useState<ProjectDetail | null>(null);
@@ -16,6 +17,9 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
   const [err, setErr] = useState('');
   const [instruction, setInstruction] = useState('');
   const [planText, setPlanText] = useState('');
+  const [opening, setOpening] = useState(false);
+  const [pasting, setPasting] = useState(false);
+  const [pasteText, setPasteText] = useState('');
   const player = useRef<PlayerRef>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -48,6 +52,37 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
 
   const inputProps = useMemo<LabProps>(() => ({spec: d?.spec ?? null, base: ''}), [d?.spec]);
 
+  /** Opens this edit in Remotion Studio. The tab is opened right away (popup blockers) and pointed at the Studio once it is up. */
+  const openEditor = async () => {
+    setErr('');
+    setOpening(true);
+    const tab = window.open('', '_blank');
+    tab?.document.write('<body style="background:#0c0c0f;color:#ececf1;font:15px -apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0">Abrindo o Remotion Studio… (na primeira vez leva uns segundos)</body>');
+    try {
+      const {url} = await api.post<{url: string}>(`/api/projects/${id}/open-studio`);
+      if (tab && !tab.closed) tab.location.href = url; else window.open(url, '_blank');
+    } catch (e) {
+      tab?.close();
+      setErr((e as Error).message);
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  // A new transcript re-indexes every word, so the AI plan and the motion scenes are redone.
+  const confirmTranscriptChange = () => (!d?.plan && !d?.spec) || confirm('Trocar a transcrição refaz o plano da IA, os cortes e o motion deste projeto. Continuar?');
+  const uploadTranscript = async (file: File) => {
+    if (!confirmTranscriptChange()) return;
+    setErr('');
+    try { await api.upload(`/api/projects/${id}/transcript`, file, () => {}); await load(); onChanged(); } catch (e) { setErr((e as Error).message); }
+  };
+  const savePastedTranscript = async () => {
+    if (!confirmTranscriptChange()) return;
+    await act(() => api.post<ProjectDetail>(`/api/projects/${id}/transcript-text`, {text: pasteText}));
+    setPasting(false); setPasteText('');
+  };
+  const removeTranscript = () => { if (confirmTranscriptChange()) act(() => api.del<ProjectDetail>(`/api/projects/${id}/transcript`)); };
+
   if (!d) return <div className="main-pad muted">Carregando…</div>;
   const {meta, spec} = d;
   const hasSource = Boolean(meta.source);
@@ -61,6 +96,9 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
         </div>
         <div className="head-actions">
           {meta.costUsd ? <span className="pill mono" title="Custo estimado das chamadas ao Claude neste projeto">IA {fmtUsd(meta.costUsd)}</span> : null}
+          <button className="btn" disabled={!spec || opening} title={spec ? 'Abre esta edição no Remotion Studio, com a timeline completa' : 'Gere uma amostra primeiro'} onClick={openEditor}>
+            {opening ? <><span className="spinner" /> Abrindo…</> : <><EditorIcon /> Abrir no editor</>}
+          </button>
           <button className="btn btn-ghost" onClick={async () => { if (confirm(`Apagar o projeto "${meta.name}" e todos os renders?`)) { await api.del(`/api/projects/${id}`); onChanged(); } }}>Apagar</button>
         </div>
       </header>
@@ -97,8 +135,23 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
             <label className="link small">enviar arquivo<input type="file" accept="audio/*" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) { await api.upload(`/api/projects/${id}/music`, f, () => {}); load(); } }} /></label>
           </div>
         </div>
-        <div className={`step ${meta.motionEnabled !== false && meta.motionPrompt ? 'step-ok' : ''}`}>
+        <div className={`step ${meta.transcript ? 'step-ok' : ''}`}>
           <span className="step-n">4</span>
+          <div className="step-body">
+            <strong>Transcrição</strong>
+            {meta.transcript ? (
+              <span className="muted small ellipsis" title={meta.transcript.timed ? 'Os tempos vêm do arquivo' : 'Texto sem tempos: o Whisper roda só para sincronizar, o texto das legendas é o seu'}>
+                {meta.transcript.name} · {meta.transcript.words} palavras{meta.transcript.timed ? '' : ' · sincroniza'} · <button className="link" disabled={running} onClick={removeTranscript}>remover</button>
+              </span>
+            ) : <span className="muted small">Automática (Whisper)</span>}
+            <span className="small row-gap">
+              <label className={`link ${running ? 'link-off' : ''}`}>enviar arquivo<input type="file" accept=".srt,.vtt,.json,.txt" hidden disabled={running} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadTranscript(f); e.target.value = ''; }} /></label>
+              <button className="link" disabled={running} onClick={() => setPasting((v) => !v)}>colar texto</button>
+            </span>
+          </div>
+        </div>
+        <div className={`step ${meta.motionEnabled !== false && meta.motionPrompt ? 'step-ok' : ''}`}>
+          <span className="step-n">5</span>
           <div className="step-body">
             <strong>Motion</strong>
             <span className="muted small ellipsis">{meta.motionEnabled === false ? 'Desligado' : meta.motionPrompt ? meta.motionPrompt : 'Escreva o prompt abaixo'}</span>
@@ -106,6 +159,19 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
         </div>
       </div>
 
+      {pasting && (
+        <div className="paste">
+          <div className="paste-head">
+            <strong>Colar transcrição</strong>
+            <span className="muted small">SRT ou VTT (com tempos) são usados direto. Texto corrido é sincronizado com a fala pelo Whisper e as legendas saem com o seu texto, sem erros de digitação.</span>
+          </div>
+          <textarea rows={8} className="code" placeholder={'1\n00:00:01,000 --> 00:00:03,200\nOlá, pessoal!\n\n…ou só o texto do roteiro'} value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
+          <div className="row-gap">
+            <button className="btn btn-primary" disabled={running || !pasteText.trim()} onClick={savePastedTranscript}>Usar esta transcrição</button>
+            <button className="btn btn-ghost" onClick={() => setPasting(false)}>Cancelar</button>
+          </div>
+        </div>
+      )}
       {!hasSource && (
         <SourcePicker label="Arraste o vídeo bruto" hint="Talking head, VSL, gravação de celular… MP4 ou MOV" uploadUrl={`/api/projects/${id}/source`} pathUrl={`/api/projects/${id}/source-path`} onDone={load} />
       )}
@@ -143,7 +209,7 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
           </div>
 
           <div className="panel">
-            <Tabs<Tab> tabs={[['ai', 'Pedir à IA'], ['style', 'Ajustes'], ['plan', 'Plano'], ['export', 'Exportar']]} value={tab} onChange={setTab} />
+            <Tabs<Tab> tabs={[['ai', 'Pedir à IA'], ['brief', 'Briefing'], ['style', 'Ajustes'], ['plan', 'Plano'], ['export', 'Exportar']]} value={tab} onChange={setTab} />
 
             {tab === 'ai' && (
               <div className="chat">
@@ -160,6 +226,8 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
                 <button className="btn btn-primary" disabled={running || !instruction.trim()} onClick={() => { start(`/api/projects/${id}/refine`, {model, instruction}); setInstruction(''); }}>Aplicar ajuste ⌘↵</button>
               </div>
             )}
+
+            {tab === 'brief' && <BriefView id={id} running={running} />}
 
             {tab === 'style' && (
               <div>
@@ -187,7 +255,7 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
               <div className="export">
                 <button className="btn btn-primary" disabled={running} onClick={() => start(`/api/projects/${id}/render`)}>Renderizar MP4</button>
                 <div className="row-gap">
-                  <button className="btn btn-sm" onClick={async () => { const {url} = await api.post<{url: string}>(`/api/projects/${id}/open-studio`); setTimeout(() => window.open(url, '_blank'), 2500); }}>Abrir no Remotion Studio</button>
+                  <button className="btn btn-sm" disabled={opening} onClick={openEditor}>{opening ? 'Abrindo…' : 'Abrir no editor (Remotion Studio)'}</button>
                   <button className="btn btn-sm" onClick={() => api.post(`/api/projects/${id}/reveal`)}>Abrir pasta</button>
                 </div>
                 <p className="muted small">No Studio, a composição <code>LabEdit</code> mostra a última edição gerada. Dá para abrir no Claude Code e criar cenas sob medida em cima dela.</p>
@@ -197,6 +265,7 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
                       <li key={r.name}>
                         <video src={r.url} controls preload="metadata" />
                         <div><span className="mono small">{r.name}</span><span className="muted small">{fmtMb(r.size)}</span><a className="btn btn-sm" href={r.url} download>Baixar</a></div>
+                        <EffectsList report={r.report} txtUrl={r.reportUrl} collapsed />
                       </li>
                     ))}
                   </ul>
@@ -209,3 +278,7 @@ export const ProjectView: React.FC<{id: string; state: State; model: string; lan
     </div>
   );
 };
+
+const EditorIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M3 14h18M8 18v2m8-2v2M7 9l2 2-2 2m4 0h3" /></svg>
+);

@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {api, fmtSec, type ProjectDetail} from './api';
+import {EffectsList} from './components';
 
 const PRESETS = [
   'Estilo Apple: fundo escuro, tipografia grande, números que contam, ícones minimalistas em SVG. Quando eu citar números ou listas, tela cheia com a câmera em janela.',
@@ -40,6 +41,9 @@ export const Pipeline: React.FC<Props> = ({d, running, start, model, language, o
   const generate = async (extra: object = {}) => { await saveNow(); start(`/api/projects/${id}/sample`, {model, language, ...extra}); };
 
   const stage = meta.stage ?? 'draft';
+  const renderOf = (url?: string) => d.renders.find((r) => r.url === url);
+  const sampleRender = renderOf(meta.sample?.url);
+  const finalRender = renderOf(meta.finalUrl);
   const hasSource = Boolean(meta.source);
   const total = spec ? spec.durationInFrames / spec.fps : meta.durationSec;
   const steps: [string, boolean, boolean][] = [
@@ -114,6 +118,7 @@ export const Pipeline: React.FC<Props> = ({d, running, start, model, language, o
           </div>
         </section>
       )}
+      {meta.sample?.url && ['sample-ready', 'full', 'done'].includes(stage) && <EffectsList report={sampleRender?.report} txtUrl={sampleRender?.reportUrl} collapsed={stage === 'done'} />}
 
       {stage === 'done' && meta.finalUrl && (
         <section className="approval approval-final">
@@ -126,6 +131,7 @@ export const Pipeline: React.FC<Props> = ({d, running, start, model, language, o
           </div>
         </section>
       )}
+      {stage === 'done' && meta.finalUrl && <EffectsList report={finalRender?.report} txtUrl={finalRender?.reportUrl} />}
     </div>
   );
 };

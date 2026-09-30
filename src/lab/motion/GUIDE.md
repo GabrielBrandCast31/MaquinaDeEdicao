@@ -53,7 +53,7 @@ export const scenes: MotionScene[] = [
 | `ease.out / inOut / in / back`, `clamp` | easings e opção de clamp para `interpolate` |
 | `Text` | texto com fonte do Lab: `font` ∈ Montserrat, Poppins, Inter, Anton, BebasNeue, Oswald, Sora, ArchivoBlack, Bangers, Roboto, LeagueSpartan, Outfit, DMSans, PlayfairDisplay |
 | `fontFamily(font, weight)` | família CSS para usar em `style` |
-| `Sfx` | efeito sonoro: whoosh, whip, switch, mouse-click, ding, page-turn, shutter-modern, click, pop, confirm, glitch, tick, ui-open, drop, glass, error, bass, shimmer, data, hit, rise-short, riser, sub, notif |
+| `Sfx` | efeito sonoro `<Sfx at={frame} name="…" />`. São ~90 efeitos em 6 categorias (transições, impactos, tensão, brilho/sucesso, interface, memes). **Leia `src/lab/sfx.ts`** para os nomes e quando usar cada um. Exemplos: `whoosh`, `whoosh-hit`, `boom`, `cash`, `typing`, `blip`, `riser-long`, `countdown`. Memes só se o pedido for de humor |
 
 `style` traz as cores/fontes do estilo do projeto (`style.captions.highlightColor`, `style.callouts.accentColor`, `style.captions.font`…). Use-as para manter a identidade.
 

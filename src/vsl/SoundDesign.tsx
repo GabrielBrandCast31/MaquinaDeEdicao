@@ -54,9 +54,7 @@ export const SoundDesign: React.FC = () => (
     <Sfx at={1277} name="hit" volume={0.23} />
     <Sfx at={1279} name="error" volume={0.25} />
     <Sfx at={1302} name="whoosh" volume={0.35} />
-    <Sfx at={1312} name="data" volume={0.12} dur={20} />
     <Sfx at={1386} name="whoosh" volume={0.35} />
-    <Sfx at={1396} name="data" volume={0.12} dur={22} />
     <Sfx at={1430} name="hit" volume={0.29} />
     <Sfx at={1485} name="bass" volume={0.29} />
     <Sfx at={1485} name="whoosh" volume={0.4} />
@@ -103,7 +101,6 @@ export const SoundDesign: React.FC = () => (
     <Sfx at={2471} name="whoosh" volume={0.35} />
     <Sfx at={2521} name="shimmer" volume={0.25} />
     <Sfx at={2582} name="whoosh" volume={0.35} />
-    <Sfx at={2586} name="data" volume={0.08} dur={130} />
     <Sfx at={2609} name="pop" volume={0.4} />
     <Sfx at={2625} name="pop" volume={0.4} />
     <Sfx at={2646} name="pop" volume={0.35} />
@@ -119,14 +116,9 @@ export const SoundDesign: React.FC = () => (
     <Sfx at={2930} name="shimmer" volume={0.3} />
     <Sfx at={2952} name="confirm" volume={0.35} />
     <Sfx at={2997} name="ui-open" volume={0.35} />
-    <Sfx at={3023} name="data" volume={0.1} dur={14} />
-    <Sfx at={3039} name="data" volume={0.1} dur={14} />
-    <Sfx at={3055} name="data" volume={0.1} dur={14} />
-    <Sfx at={3071} name="data" volume={0.1} dur={14} />
     <Sfx at={3096} name="mouse-click" volume={0.5} />
     <Sfx at={3098} name="confirm" volume={0.4} />
     <Sfx at={3117} name="whoosh" volume={0.35} />
-    <Sfx at={3157} name="data" volume={0.1} dur={40} />
     <Sfx at={3253} name="confirm" volume={0.45} />
     <Sfx at={3276} name="whoosh" volume={0.3} />
     <Sfx at={3445} name="whoosh" volume={0.35} />
@@ -135,7 +127,6 @@ export const SoundDesign: React.FC = () => (
     <Sfx at={3641} name="confirm" volume={0.3} />
     <Sfx at={3723} name="confirm" volume={0.3} />
     <Sfx at={3804} name="whoosh" volume={0.35} />
-    <Sfx at={3834} name="data" volume={0.1} dur={30} />
     <Sfx at={3868} name="confirm" volume={0.4} />
     <Sfx at={3878} name="notif" volume={0.22} />
     <Sfx at={3890} name="notif" volume={0.22} />

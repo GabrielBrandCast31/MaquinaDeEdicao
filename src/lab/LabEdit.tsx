@@ -4,7 +4,7 @@ import {AbsoluteFill, Easing, interpolate, random, Sequence, useCurrentFrame} fr
 import {fontFamily} from './fonts';
 import {MOTION} from './motion';
 import {LabBase} from './motionKit';
-import type {CamMode, EditSpec, LabProps, MotionScene, StyleProfile} from './types';
+import {SFX_MAX_SEC, type CamMode, type EditSpec, type LabProps, type MotionScene, type StyleProfile} from './types';
 
 const clamp = {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'} as const;
 const easeOut = Easing.bezier(0.16, 1, 0.3, 1);
@@ -37,8 +37,8 @@ const punchFactor = (spec: EditSpec, f: number) => {
 type Placed = {scene: MotionScene; from: number; dur: number};
 
 /** Resolves AI-written scenes (anchored to raw word indices) onto the output timeline. */
-const placeScenes = (spec: EditSpec): Placed[] => {
-  const scenes = spec.projectId ? MOTION[spec.projectId] ?? [] : [];
+const placeScenes = (spec: EditSpec, override?: MotionScene[]): Placed[] => {
+  const scenes = override ?? (spec.projectId ? MOTION[spec.projectId] ?? [] : []);
   const out: Placed[] = [];
   for (const scene of scenes) {
     const first = spec.words.find((w) => w.ri >= scene.startWord);
@@ -279,7 +279,7 @@ const Sound: React.FC<{spec: EditSpec; base?: string}> = ({spec, base}) => {
   return (
     <>
       {spec.sfx.map((s, i) => (
-        <Sequence key={i} from={Math.max(0, s.f)} durationInFrames={spec.fps * 3} layout="none" name={`sfx:${s.name}`}>
+        <Sequence key={i} from={Math.max(0, s.f)} durationInFrames={spec.fps * SFX_MAX_SEC} layout="none" name={`sfx:${s.name}`}>
           <Audio src={url(base, `/static/sfx/${s.name}.wav`)} volume={() => s.volume} />
         </Sequence>
       ))}
@@ -321,8 +321,8 @@ const SceneLayer: React.FC<{spec: EditSpec; placed: Placed[]; layer: 'full' | 'o
 );
 
 /** Data-driven edit: everything comes from an EditSpec produced by the Lab, plus AI-written motion scenes. */
-export const LabEdit: React.FC<LabProps> = ({spec, base}) => {
-  const placed = useMemo(() => (spec ? placeScenes(spec) : []), [spec]);
+export const LabEdit: React.FC<LabProps> = ({spec, base, scenes}) => {
+  const placed = useMemo(() => (spec ? placeScenes(spec, scenes) : []), [spec, scenes]);
   if (!spec) return <Empty />;
   const bold = spec.style.callouts.enabled && spec.style.callouts.style === 'bold-center';
   const inScene = (f: number) => placed.some((p) => f >= p.from && f < p.from + p.dur);

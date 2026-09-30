@@ -2,10 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {askClaude} from './ai.mjs';
 import {extractWav, fileExists, fingerprint, makeProxy, probe, run, silences, still, transcribe} from './media.mjs';
+import {slot} from './jobctx.mjs';
 import {clearMotion} from './motion.mjs';
+import {clearBrief, getBrief, saveBrief, stagePrompt} from './prompts.mjs';
+import {effectsReport, reportFiles} from './report.mjs';
 import {sanitizePlan, sanitizeStyle} from './sanitize.mjs';
-import {ASPECTS, PLAN_SCHEMA, REFINE_SCHEMA} from './schemas.mjs';
-import {DATA, dirOf, getMeta, mediaUrl, readJson, ROOT, saveMeta, writeJson} from './store.mjs';
+import {alignToTimings, readTranscript} from './transcript.mjs';
+import {ASPECTS, OVERVIEW_SCHEMA, PLAN_SCHEMA, REFINE_SCHEMA, sfxGuide} from './schemas.mjs';
+import {dirOf, getMeta, mediaUrl, readJson, ROOT, saveMeta, writeJson} from './store.mjs';
 
 const files = (id) => {
   const dir = dirOf('project', id);
@@ -34,6 +38,7 @@ export const prepareRaw = async (id, {language}, job) => {
     // New footage: everything derived from the old one (transcript indices, plan, motion) is invalid.
     for (const k of ['raw', 'words', 'silences', 'still', 'info', 'plan', 'spec']) fs.rmSync(f[k], {force: true});
     clearMotion(id);
+    clearBrief(id, ['overview', 'audience', 'tone', 'sections', 'overviewKey', 'visual', 'blocks', 'rosterKey']);
     saveMeta('project', id, {built: false, chat: [], sample: {startSec: 0, lenSec: meta.sample?.lenSec ?? 15}, stage: 'sampling', finalUrl: null});
     job.step('Gerando proxy do bruto');
     await makeProxy(meta.source, f.raw, {fps: 30, duration: info.duration, onProgress: (p) => job.progress(p)});
@@ -41,13 +46,26 @@ export const prepareRaw = async (id, {language}, job) => {
   }
   const pInfo = await probe(f.raw);
   writeJson(f.info, pInfo);
-  if (!fileExists(f.words) || meta.language !== language) {
-    job.step('Transcrevendo (Whisper)');
-    const wav = path.join(f.dir, 'audio16k.wav');
-    await extractWav(f.raw, wav);
-    writeJson(f.words, await transcribe(wav, language, (p) => job.progress(p)));
-    fs.rmSync(wav, {force: true});
-    saveMeta('project', id, {language});
+  // Words come from the uploaded transcript when there is one (TXT still needs Whisper for timing).
+  const tr = getMeta('project', id).transcript;
+  const wantKey = tr ? `file:${tr.fp}${tr.timed ? '' : `:${language}`}` : `whisper:${language}`;
+  const haveKey = meta.wordsKey ?? (meta.language ? `whisper:${meta.language}` : null);
+  if (!fileExists(f.words) || haveKey !== wantKey) {
+    const parsed = tr ? readTranscript(tr.file) : null;
+    let words;
+    if (parsed?.timed) {
+      job.step('Lendo a transcrição enviada');
+      words = parsed.words;
+    } else {
+      job.step(parsed ? 'Sincronizando seu texto com a fala (Whisper)' : 'Transcrevendo (Whisper)');
+      const wav = path.join(f.dir, 'audio16k.wav');
+      await extractWav(f.raw, wav);
+      const heard = await transcribe(wav, language, (p) => job.progress(p));
+      fs.rmSync(wav, {force: true});
+      words = parsed ? alignToTimings(parsed.text, heard) : heard;
+    }
+    writeJson(f.words, words);
+    saveMeta('project', id, {language, wordsKey: wantKey});
   }
   if (!fileExists(f.silences)) {
     job.step('Mapeando pausas');
@@ -147,11 +165,11 @@ export const buildSpec = (id) => {
   const callouts = style.callouts.enabled ? plan.callouts.map((c) => ({f: at(c.w), dur: Math.round(c.durationSec * fps), text: c.text})).filter((c) => c.f !== null) : [];
   const sv = style.audio.sfx;
   const sfx = [];
-  const addSfx = (fr, name, offset = 0) => { if (name && fr !== null && !sfx.some((s) => Math.abs(s.f - fr) < 4)) sfx.push({f: Math.max(0, fr + offset), name, volume: sv.volume}); };
-  for (const c of callouts) addSfx(c.f, sv.onCallout);
-  for (const p of punches) addSfx(p.f, sv.onPunch);
-  for (const t of transitions) addSfx(t.f, sv.onCut, -3);
-  for (const s of plan.sfx) addSfx(at(s.w), s.name);
+  const addSfx = (fr, name, src, offset = 0) => { if (name && fr !== null && !sfx.some((s) => Math.abs(s.f - fr) < 4)) sfx.push({f: Math.max(0, fr + offset), name, volume: sv.volume, src}); };
+  for (const c of callouts) addSfx(c.f, sv.onCallout, 'callout');
+  for (const p of punches) addSfx(p.f, sv.onPunch, 'punch');
+  for (const t of transitions) addSfx(t.f, sv.onCut, 'cut', -3);
+  for (const s of plan.sfx) addSfx(at(s.w), s.name, 'plan');
   sfx.sort((a, b) => a.f - b.f);
 
   const spec = {
@@ -162,7 +180,6 @@ export const buildSpec = (id) => {
     style,
   };
   writeJson(f.spec, spec);
-  writeJson(path.join(DATA, 'current-spec.json'), spec);
   saveMeta('project', id, {built: true, durationSec: +(out / fps).toFixed(1), clips: clips.length});
   return spec;
 };
@@ -180,6 +197,25 @@ const transcriptForAi = (words) => {
   return lines.map((l) => `[${words[l[0]].start.toFixed(1)}s] ${l.map((i) => `${i}:${words[i].t}`).join(' ')}`).join('\n');
 };
 
+/** Brief, part 1: overview + section map of the whole talk (redone only when the transcript changes). */
+export const overviewWithAi = async (id, {model, force = false}, job) => {
+  const f = files(id);
+  const words = readJson(f.words) ?? [];
+  if (!words.length) return null;
+  const key = `${getMeta('project', id)?.wordsKey ?? ''}:${words.length}`;
+  if (!force && getBrief(id).overviewKey === key) return getBrief(id);
+  job.step('IA lendo o vídeo inteiro (briefing)');
+  const {data, costUsd, model: used} = await askClaude({prompt: stagePrompt(id, 'visao', {transcricao: transcriptForAi(words)}), schema: OVERVIEW_SCHEMA, cwd: f.dir, model, onLine: (l) => l && job.log(l)});
+  job.cost(costUsd, used);
+  const last = words.length - 1;
+  const sections = data.sections
+    .map((x) => ({...x, fromWord: Math.max(0, Math.min(last, Math.round(x.fromWord))), toWord: Math.max(0, Math.min(last, Math.round(x.toWord)))}))
+    .filter((x) => x.toWord >= x.fromWord)
+    .sort((a, b) => a.fromWord - b.fromWord);
+  job.log(data.overview);
+  return saveBrief(id, {overview: data.overview, audience: data.audience, tone: data.tone, sections, overviewKey: key});
+};
+
 const refStats = (styleId) => (styleId ? getMeta('style', styleId)?.stats ?? null : null);
 const densityHint = {low: '1 a cada ~25 s', medium: '1 a cada ~12 s', high: '1 a cada ~6 s'};
 
@@ -191,28 +227,16 @@ export const planWithAi = async (id, {model}, job) => {
   const info = readJson(f.info);
   const stats = refStats(meta.styleId);
   job.step('IA montando o plano de edição');
-  const prompt = `Você vai editar um VÍDEO BRUTO replicando o modelo de edição de uma referência.
-
-## Estilo a replicar
-${JSON.stringify(style, null, 1)}
-
-## Métricas da referência
-${stats ? JSON.stringify(stats, null, 1) : '(indisponível)'}
-
-## Bruto
-Duração: ${info.duration.toFixed(1)} s · ${info.width}×${info.height}. Saída: ${style.format.aspect}.
-Quadro do bruto (abra com Read para localizar o rosto): ${f.still}
-
-## Transcrição do bruto (índice:palavra, agrupada por pausas; [tempo] = início da linha)
-${transcriptForAi(words)}
-
-## Tarefa
-1. subject: onde está o rosto no quadro bruto (fx, fy de 0 a 1), para o recorte ${style.format.aspect} não cortar a cabeça.
-2. dropWords: remova erros, gaguejos, frases repetidas (fique com a ÚLTIMA versão boa), falas de bastidor ("corta", "de novo", "deixa eu refazer") e vícios longos. Não remova conteúdo útil. Os silêncios já são cortados automaticamente.
-3. emphasis: escolha palavras de impacto. "punch" (zoom de ênfase) com ritmo parecido com a referência (${stats ? `ela tem ${stats.cutsPerMin} cortes/min` : 'ritmo dinâmico'}); "highlight" nas palavras-chave para a legenda${style.captions.highlight === 'keywords' ? ' (o estilo destaca palavras-chave, marque de 1 a 2 por frase)' : ''}.
-4. callouts: ${style.callouts.enabled ? `o estilo usa destaques (${style.callouts.style}), cerca de ${densityHint[style.callouts.frequency]}. Texto curto e forte (máx 5 palavras).` : 'o estilo NÃO usa destaques: retorne lista vazia.'}
-5. sfx: poucos efeitos extras em momentos-chave (lista vazia se o estilo for limpo).
-6. notes: resumo das decisões.`;
+  const prompt = stagePrompt(id, 'plano', {
+    estilo_json: JSON.stringify(style, null, 1),
+    metricas: stats ? JSON.stringify(stats, null, 1) : '(indisponível)',
+    duracao: info.duration.toFixed(1), largura: info.width, altura: info.height, aspecto: style.format.aspect, still: f.still,
+    transcricao: transcriptForAi(words),
+    ritmo: stats ? `ela tem ${stats.cutsPerMin} cortes/min` : 'ritmo dinâmico',
+    destaque_legenda: style.captions.highlight === 'keywords' ? ' (o estilo destaca palavras-chave, marque de 1 a 2 por frase)' : '',
+    callouts: style.callouts.enabled ? `o estilo usa destaques (${style.callouts.style}), cerca de ${densityHint[style.callouts.frequency]}. Texto curto e forte (máx 5 palavras).` : 'o estilo NÃO usa destaques: retorne lista vazia.',
+    sfx_guia: sfxGuide(),
+  });
   const {data, costUsd, model: used} = await askClaude({prompt, schema: PLAN_SCHEMA, cwd: f.dir, model, onLine: (l) => l && job.log(l)});
   const plan = sanitizePlan(data, words.length);
   writeJson(f.plan, plan);
@@ -229,22 +253,11 @@ export const refineWithAi = async (id, {model, instruction}, job) => {
   const plan = sanitizePlan(readJson(f.plan), words.length);
   const history = (meta.chat ?? []).slice(-6).map((m) => `${m.role === 'user' ? 'Usuário' : 'IA'}: ${m.text}`).join('\n');
   job.step('IA aplicando o ajuste');
-  const prompt = `Você está ajustando uma edição automática. Aplique o pedido do usuário alterando o ESTILO e/ou o PLANO e devolva ambos completos (mantenha o que não foi pedido).
-
-## Pedido
-${instruction}
-
-## Conversa anterior
-${history || '(nenhuma)'}
-
-## Estilo atual
-${JSON.stringify(style, null, 1)}
-
-## Plano atual (índices referem-se à transcrição)
-${JSON.stringify(plan, null, 1)}
-
-## Transcrição (índice:palavra)
-${transcriptForAi(words)}`;
+  const prompt = stagePrompt(id, 'ajuste', {
+    pedido_ajuste: instruction, historico: history || '(nenhuma)',
+    estilo_json: JSON.stringify(style, null, 1), plano_json: JSON.stringify(plan, null, 1),
+    transcricao: transcriptForAi(words), sfx_guia: sfxGuide(),
+  });
   const {data, costUsd, model: used} = await askClaude({prompt, schema: REFINE_SCHEMA, cwd: f.dir, model, onLine: (l) => l && job.log(l)});
   writeJson(f.style, sanitizeStyle(data.style));
   writeJson(f.plan, sanitizePlan(data.plan, words.length));
@@ -270,13 +283,18 @@ export const renderProject = async (id, {port, frames, label = ''}, job) => {
   fs.mkdirSync(emptyPublic, {recursive: true});
   job.step(frames ? 'Renderizando a amostra' : 'Renderizando MP4');
   const range = frames ? [`--frames=${frames[0]}-${frames[1]}`] : [];
-  await run('npx', ['remotion', 'render', 'src/index.ts', 'LabEdit', outFile, `--props=${propsFile}`, `--public-dir=${emptyPublic}`, '--codec=h264', '--crf=18', '--log=info', ...range], {
+  await slot('render', () => run('npx', ['remotion', 'render', 'src/index.ts', 'LabEdit', outFile, `--props=${propsFile}`, `--public-dir=${emptyPublic}`, '--codec=h264', '--crf=18', '--log=info', ...range], {
     onLine: (l) => {
       const m = /(\d+)\/(\d+)/.exec(l);
       if (m && /Render|Encod|frames/i.test(l)) job.progress(Number(m[1]) / Number(m[2]));
       else if (!/^\s*$/.test(l) && !/━/.test(l)) job.log(l.slice(0, 200));
     },
-  });
+  }));
+  // What was used, for the list shown under the video.
+  const report = effectsReport(id, spec, frames);
+  const rf = reportFiles(outFile);
+  writeJson(rf.json, report);
+  fs.writeFileSync(rf.txt, report.text);
   job.log(`Pronto: ${path.relative(ROOT, outFile)}`);
   return mediaUrl(outFile);
 };
@@ -285,7 +303,21 @@ export const listRenders = (id) => {
   const dir = files(id).renders;
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter((n) => n.endsWith('.mp4')).sort().reverse()
-    .map((n) => ({name: n, url: mediaUrl(path.join(dir, n)), size: fs.statSync(path.join(dir, n)).size}));
+    .map((n) => {
+      const file = path.join(dir, n);
+      const rf = reportFiles(file);
+      return {name: n, url: mediaUrl(file), size: fs.statSync(file).size, report: readJson(rf.json), reportUrl: fs.existsSync(rf.txt) ? mediaUrl(rf.txt) : null};
+    });
+};
+
+/** Transcript changed: word indices shift, so the plan, the timeline and the motion scenes are stale. */
+export const resetTranscript = (id) => {
+  const f = files(id);
+  for (const k of ['words', 'plan', 'spec']) fs.rmSync(f[k], {force: true});
+  clearMotion(id);
+  clearBrief(id, ['overview', 'audience', 'tone', 'sections', 'overviewKey', 'rosterKey']);
+  const meta = getMeta('project', id);
+  saveMeta('project', id, {built: false, chat: [], stage: 'draft', finalUrl: null, sample: {startSec: meta?.sample?.startSec ?? 0, lenSec: meta?.sample?.lenSec ?? 15}});
 };
 
 export const projectFiles = files;

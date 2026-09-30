@@ -1,4 +1,4 @@
-import {DEFAULT_STYLE, STYLE_SCHEMA} from './schemas.mjs';
+import {DEFAULT_STYLE, SFX, STYLE_SCHEMA} from './schemas.mjs';
 
 const isColor = (v) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
 
@@ -44,7 +44,7 @@ export const sanitizePlan = (plan, wordCount) => {
     dropWords: (p.dropWords ?? []).filter((d) => idx(d.from) && idx(d.to) && d.to >= d.from),
     emphasis: (p.emphasis ?? []).filter((e) => idx(e.w)),
     callouts: (p.callouts ?? []).filter((c) => idx(c.w) && c.text).map((c) => ({...c, durationSec: Math.min(5, Math.max(0.6, Number(c.durationSec) || 1.5))})),
-    sfx: (p.sfx ?? []).filter((s) => idx(s.w)),
+    sfx: (p.sfx ?? []).filter((s) => idx(s.w) && SFX.includes(s.name)),
     notes: String(p.notes ?? ''),
   };
 };

@@ -1,7 +1,13 @@
 // JSON Schemas handed to Claude (structured output). Keep in sync with src/lab/types.ts.
+// The sound-effect catalog is shared with the composition (Node strips the types when importing .ts).
+import {SFX_CATEGORIES, SFX_LIBRARY} from '../../src/lab/sfx.ts';
 
 export const FONTS = ['Montserrat', 'Poppins', 'Inter', 'Anton', 'BebasNeue', 'Oswald', 'Sora', 'ArchivoBlack', 'Bangers', 'Roboto', 'LeagueSpartan', 'Outfit', 'DMSans', 'PlayfairDisplay'];
-export const SFX = ['whoosh', 'whip', 'switch', 'mouse-click', 'ding', 'page-turn', 'shutter-modern', 'click', 'pop', 'confirm', 'glitch', 'tick', 'ui-open', 'drop', 'glass', 'error', 'bass', 'shimmer', 'data', 'hit', 'rise-short', 'riser', 'sub', 'notif'];
+export const SFX = SFX_LIBRARY.map((s) => s.name);
+export {SFX_CATEGORIES, SFX_LIBRARY};
+
+/** Catalog as prompt text: the AI only sees names in the schema enum, this tells it what each one sounds like. */
+export const sfxGuide = () => SFX_CATEGORIES.map((c) => `${c.label} (${c.hint}): ${SFX_LIBRARY.filter((s) => s.cat === c.id).map((s) => `${s.name} = ${s.hint}`).join('; ')}`).join('\n');
 export const ASPECTS = {'9:16': [1080, 1920], '16:9': [1920, 1080], '1:1': [1080, 1080], '4:5': [1080, 1350]};
 
 // Numeric ranges and color formats live in the description (structured output ignores min/max/pattern);
@@ -124,3 +130,21 @@ export const DEFAULT_STYLE = {
   audio: {music: {enabled: false, volume: 0.12, duckUnderVoice: true}, sfx: {onCut: null, onPunch: null, onCallout: 'pop', volume: 0.5}},
   notes: [],
 };
+
+// Project brief (the "prompt pai"): written once from the whole transcript, then after the sample.
+export const OVERVIEW_SCHEMA = obj({
+  overview: str('3-5 frases em pt-BR: o que é o vídeo, promessa central e arco'),
+  audience: str('Público, em uma frase'),
+  tone: str('Tom da fala, curto'),
+  sections: {
+    type: 'array',
+    items: obj({fromWord: num('Índice da primeira palavra da seção'), toWord: num('Índice da última palavra'), topic: str('Assunto, curto'), intent: str('O que o visual deve fazer nesta seção')}),
+  },
+});
+export const ROSTER_SCHEMA = obj({
+  visual: str('Linguagem visual da amostra, reproduzível sem ver o código (8-15 linhas)'),
+  blocks: {
+    type: 'array',
+    items: obj({index: num('Número do bloco (1, 2, …)'), focus: str('O que animar no bloco'), avoid: str('O que evitar para não repetir os vizinhos'), bridge: str('Como começa e termina para emendar')}),
+  },
+});

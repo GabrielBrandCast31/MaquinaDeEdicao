@@ -1,17 +1,20 @@
 import React, {useEffect, useState} from 'react';
-import {ASPECTS, FONTS, SFX, type StyleProfile} from '../../src/lab/types';
+import {SFX_CATEGORIES, SFX_LIBRARY} from '../../src/lab/sfx';
+import {ASPECTS, FONTS, type StyleProfile} from '../../src/lab/types';
+import {playSfx, useSfxPlaying} from './sound';
 
 type F =
   | {k: string; label: string; t: 'bool'}
   | {k: string; label: string; t: 'num'; min: number; max: number; step: number}
   | {k: string; label: string; t: 'enum'; opts: readonly (string | null)[]; names?: Record<string, string>}
-  | {k: string; label: string; t: 'color'};
+  | {k: string; label: string; t: 'color'}
+  | {k: string; label: string; t: 'sfx'};
 
 const n = (k: string, label: string, min: number, max: number, step: number): F => ({k, label, t: 'num', min, max, step});
 const b = (k: string, label: string): F => ({k, label, t: 'bool'});
 const e = (k: string, label: string, opts: readonly (string | null)[], names?: Record<string, string>): F => ({k, label, t: 'enum', opts, names});
 const c = (k: string, label: string): F => ({k, label, t: 'color'});
-const sfxOpts = [null, ...SFX];
+const sfx = (k: string, label: string): F => ({k, label, t: 'sfx'});
 
 const SECTIONS: {title: string; fields: F[]}[] = [
   {title: 'Formato', fields: [e('format.aspect', 'Proporção', Object.keys(ASPECTS)), n('format.fps', 'FPS', 24, 60, 1)]},
@@ -42,7 +45,7 @@ const SECTIONS: {title: string; fields: F[]}[] = [
   {title: 'Barra de progresso', fields: [b('progressBar.enabled', 'Mostrar'), c('progressBar.color', 'Cor'), e('progressBar.position', 'Posição', ['top', 'bottom'], {top: 'Topo', bottom: 'Base'})]},
   {title: 'Áudio', fields: [
     b('audio.music.enabled', 'Trilha'), n('audio.music.volume', 'Volume da trilha', 0, 0.6, 0.01), b('audio.music.duckUnderVoice', 'Abaixar sob a voz'),
-    e('audio.sfx.onCut', 'SFX nas transições', sfxOpts), e('audio.sfx.onPunch', 'SFX no punch', sfxOpts), e('audio.sfx.onCallout', 'SFX nos destaques', sfxOpts), n('audio.sfx.volume', 'Volume dos SFX', 0, 1, 0.05),
+    sfx('audio.sfx.onCut', 'SFX nas transições'), sfx('audio.sfx.onPunch', 'SFX no punch'), sfx('audio.sfx.onCallout', 'SFX nos destaques'), n('audio.sfx.volume', 'Volume dos SFX', 0, 1, 0.05),
   ]},
 ];
 
@@ -56,6 +59,7 @@ const set = <T,>(o: T, k: string, v: unknown): T => {
 const Field: React.FC<{f: F; value: unknown; onChange: (v: unknown) => void}> = ({f, value, onChange}) => {
   if (f.t === 'bool') return <label className="field field-bool"><input type="checkbox" checked={Boolean(value)} onChange={(ev) => onChange(ev.target.checked)} /><span>{f.label}</span></label>;
   if (f.t === 'color') return <label className="field"><span>{f.label}</span><span className="color-row"><input type="color" value={String(value)} onChange={(ev) => onChange(ev.target.value.toUpperCase())} /><code>{String(value)}</code></span></label>;
+  if (f.t === 'sfx') return <SfxField label={f.label} value={value as string | null} onChange={onChange} />;
   if (f.t === 'enum') {
     return (
       <label className="field"><span>{f.label}</span>
@@ -69,6 +73,26 @@ const Field: React.FC<{f: F; value: unknown; onChange: (v: unknown) => void}> = 
   return (
     <label className="field"><span>{f.label} <em className="mono">{Number.isInteger(f.step) ? v : v.toFixed(2)}</em></span>
       <input type="range" min={f.min} max={f.max} step={f.step} value={v} onChange={(ev) => onChange(Number(ev.target.value))} />
+    </label>
+  );
+};
+
+/** Sound picker grouped like the Biblioteca, with a ▶ to hear the current choice. */
+const SfxField: React.FC<{label: string; value: string | null; onChange: (v: string | null) => void}> = ({label, value, onChange}) => {
+  const playing = useSfxPlaying();
+  return (
+    <label className="field"><span>{label}</span>
+      <span className="sfx-pick">
+        <select value={value ?? ''} onChange={(ev) => { const v = ev.target.value || null; onChange(v); if (v) playSfx(v); }}>
+          <option value="">— nenhum —</option>
+          {SFX_CATEGORIES.map((c) => (
+            <optgroup key={c.id} label={c.label}>
+              {SFX_LIBRARY.filter((s) => s.cat === c.id).map((s) => <option key={s.name} value={s.name}>{s.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        <button type="button" className="icon-btn" disabled={!value} title="Ouvir" onClick={(ev) => { ev.preventDefault(); if (value) playSfx(value); }}>{playing.name === value && value ? '■' : '▶'}</button>
+      </span>
     </label>
   );
 };

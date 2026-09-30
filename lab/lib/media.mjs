@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {toCaptions, transcribe as whisper} from '@remotion/install-whisper-cpp';
-import {track} from './jobctx.mjs';
+import {slot, track} from './jobctx.mjs';
 import {ROOT} from './store.mjs';
 
 const WHISPER_PATH = path.join(ROOT, 'whisper.cpp');
@@ -39,7 +39,8 @@ export const probe = async (file) => {
 };
 
 /** H.264 proxy: short side ≤ 1080, constant fps, dense keyframes for fast seeking in the Player. */
-export const makeProxy = async (input, output, {fps = 30, duration, onProgress} = {}) => {
+export const makeProxy = (input, output, opts) => slot('proxy', () => proxy(input, output, opts));
+const proxy = async (input, output, {fps = 30, duration, onProgress} = {}) => {
   const scale = "scale='if(gt(iw,ih),-2,min(1080,iw))':'if(gt(iw,ih),min(1080,ih),-2)'";
   await run('ffmpeg', ['-y', '-hide_banner', '-i', input, '-vf', `fps=${fps},${scale},format=yuv420p`, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-g', String(fps), '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', output], {
     onLine: (l) => {
@@ -53,11 +54,11 @@ export const extractWav = (input, output) => run('ffmpeg', ['-y', '-hide_banner'
 
 /** Word-level transcript: [{t, start, end}] in seconds. */
 export const transcribe = async (wav, language = 'pt', onProgress) => {
-  const out = await whisper({
+  const out = await slot('whisper', () => whisper({
     model: WHISPER_MODEL, whisperPath: WHISPER_PATH, whisperCppVersion: '1.7.4', inputPath: wav,
     tokenLevelTimestamps: true, splitOnWord: true, printOutput: false, language,
     onProgress: onProgress ? (p) => onProgress(p) : undefined,
-  });
+  }));
   const {captions} = toCaptions({whisperCppOutput: out});
   return captions
     .map((c) => ({t: c.text.trim(), start: c.startMs / 1000, end: c.endMs / 1000}))

@@ -1,8 +1,9 @@
 import type {EditSpec, StyleProfile} from '../../src/lab/types';
 
+export type JobStep = {label: string; status: 'running' | 'done' | 'error'; progress: number | null; startedAt: number; endedAt?: number; waiting?: string | null; parallel?: boolean};
 export type Job = {
-  id: string; kind: string; target: string; status: 'running' | 'done' | 'error'; step: string;
-  log: string[]; progress: number | null; costUsd: number; error: string | null; startedAt: number; endedAt?: number;
+  id: string; kind: string; target: string; status: 'running' | 'done' | 'error'; step: string; steps?: JobStep[];
+  log: string[]; progress: number | null; waiting?: string | null; costUsd: number; error: string | null; startedAt: number; endedAt?: number;
 };
 export type Stats = Record<string, number | string | null>;
 export type StyleMeta = {
@@ -17,6 +18,8 @@ export type ProjectMeta = {
   stage?: 'draft' | 'sampling' | 'sample-ready' | 'full' | 'done';
   sample?: {startSec: number; lenSec: number; from?: number; to?: number; url?: string};
   finalUrl?: string;
+  /** Transcript supplied by the user (otherwise Whisper transcribes). `timed: false` = plain text aligned by Whisper. */
+  transcript?: {name: string; kind: 'srt' | 'vtt' | 'json' | 'txt'; timed: boolean; words: number} | null;
 };
 export type Plan = {
   subject: {fx: number; fy: number};
@@ -26,9 +29,26 @@ export type Plan = {
   sfx: {w: number; name: string}[];
   notes: string;
 };
-export type State = {styles: StyleMeta[]; projects: ProjectMeta[]; music: {name: string; url: string}[]; running: {id: string; target: string; step: string}[]};
+export type State = {styles: StyleMeta[]; projects: ProjectMeta[]; music: {name: string; url: string}[]; running: RunningJob[]};
+export type RunningJob = {id: string; target: string; kind: string; name: string; step: string; waiting: string | null; progress: number | null; startedAt: number};
 export type StyleDetail = {meta: StyleMeta; style: StyleProfile | null};
-export type ProjectDetail = {meta: ProjectMeta; style: StyleProfile; plan: Plan | null; spec: EditSpec | null; renders: {name: string; url: string; size: number}[]; words: number};
+export type Footage = {url: string; width: number; height: number; duration: number; name: string};
+export type Library = {sfx: Record<string, {sec: number; peaks: number[]} | null>; footage: Footage | null; baseStyle: StyleProfile};
+export type EffectsReport = {
+  title: string;
+  sounds: {edit: {at: string; name: string; label: string; source: string}[]; motion: {at: string; scene: string; names: string[]}[]; counts: Record<string, number>; music: {name: string; volume: number} | null};
+  visuals: {group: string; label: string; detail: string; times: string[]}[];
+  motion: {at: string; until: string; id: string; layer: string; camera: string; what: string; sfx: string[]}[];
+  text: string;
+};
+export type Render = {name: string; url: string; size: number; report: EffectsReport | null; reportUrl: string | null};
+export type ProjectDetail = {meta: ProjectMeta; style: StyleProfile; plan: Plan | null; spec: EditSpec | null; renders: Render[]; words: number};
+export type Brief = {
+  overview?: string; audience?: string; tone?: string; visual?: string; notes?: string;
+  sections?: {fromWord: number; toWord: number; topic: string; intent: string}[];
+  blocks?: {index: number; fromSec: number; toSec: number; focus: string; avoid: string; bridge: string}[];
+};
+export type BriefDetail = {brief: Brief; parent: string};
 
 const call = async <T,>(method: string, url: string, body?: unknown): Promise<T> => {
   const res = await fetch(url, {method, headers: body ? {'Content-Type': 'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined});

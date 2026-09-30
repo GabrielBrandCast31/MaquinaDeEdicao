@@ -36,7 +36,7 @@
     "build": "remotion bundle",
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc && tsc -p lab/ui",
-    "lab": "node lab/server.mjs",
+    "lab": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON lab/server.mjs",
     "predev": "node lab/lib/motion.mjs",
     "prelint": "node lab/lib/motion.mjs"
   },

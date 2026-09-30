@@ -1,12 +1,14 @@
 import {spawn} from 'node:child_process';
-import {track} from './jobctx.mjs';
+import {slot, track} from './jobctx.mjs';
 
 /**
  * Asks Claude through the local `claude` CLI (your Claude Code login — no API key needed).
  * Images are passed as file paths that Claude opens with its Read tool.
  * Returns {data, costUsd, model}.
  */
-export const askClaude = ({prompt, schema, cwd, model = 'sonnet', system, onLine, timeoutMs = 15 * 60 * 1000, tools = ['Read'], allowed = ['Read'], addDirs = [cwd]}) =>
+export const askClaude = (opts) => slot('ai', () => callClaude(opts));
+
+const callClaude = ({prompt, schema, cwd, model = 'sonnet', system, onLine, timeoutMs = 15 * 60 * 1000, tools = ['Read'], allowed = ['Read'], addDirs = [cwd]}) =>
   new Promise((resolve, reject) => {
     // dontAsk: anything not in `allowed` is denied (e.g. writes outside the project's motion folder).
     const args = [

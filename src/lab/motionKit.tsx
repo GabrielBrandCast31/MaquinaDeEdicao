@@ -4,7 +4,7 @@ import {Audio} from '@remotion/media';
 import React, {createContext, useContext} from 'react';
 import {Easing, interpolate, Sequence, spring, useCurrentFrame, useVideoConfig} from 'remotion';
 import {fontFamily} from './fonts';
-import type {FontName, SfxName} from './types';
+import {SFX_MAX_SEC, type FontName, type SfxName} from './types';
 
 export type {CamMode, MotionScene, SceneProps} from './types';
 export {fontFamily};
@@ -38,12 +38,12 @@ export const wordFrame = (words: {t: string; f: number}[], text: string, fallbac
   return words.find((w) => n(w.t).includes(n(text)))?.f ?? fallback;
 };
 
-/** Sound effect at a local frame. Available names: see SfxName in ./types. */
+/** Sound effect at a local frame. Names and what each sounds like: src/lab/sfx.ts. */
 export const Sfx: React.FC<{at: number; name: SfxName; volume?: number}> = ({at, name, volume = 0.5}) => {
   const base = useContext(LabBase);
   const {fps} = useVideoConfig();
   return (
-    <Sequence from={Math.max(0, Math.round(at))} durationInFrames={fps * 3} layout="none" name={`sfx:${name}`}>
+    <Sequence from={Math.max(0, Math.round(at))} durationInFrames={fps * SFX_MAX_SEC} layout="none" name={`sfx:${name}`}>
       <Audio src={`${base}/static/sfx/${name}.wav`} volume={() => volume} />
     </Sequence>
   );

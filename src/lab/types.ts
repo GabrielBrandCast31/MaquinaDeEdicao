@@ -1,6 +1,7 @@
 import type React from 'react';
+import {SFX_LIBRARY} from './sfx';
 // Shared contract between the Lab server (lab/lib/*.mjs), the Lab UI and the LabEdit composition.
-// Keep enums in sync with lab/lib/schemas.mjs.
+// Keep enums in sync with lab/lib/schemas.mjs (the SFX list is shared through ./sfx.ts).
 
 export const ASPECTS = {
   '9:16': {width: 1080, height: 1920},
@@ -16,11 +17,10 @@ export const FONTS = [
 ] as const;
 export type FontName = (typeof FONTS)[number];
 
-export const SFX = [
-  'whoosh', 'whip', 'switch', 'mouse-click', 'ding', 'page-turn', 'shutter-modern', 'click', 'pop', 'confirm',
-  'glitch', 'tick', 'ui-open', 'drop', 'glass', 'error', 'bass', 'shimmer', 'data', 'hit', 'rise-short', 'riser', 'sub', 'notif',
-] as const;
-export type SfxName = (typeof SFX)[number];
+export type SfxName = (typeof SFX_LIBRARY)[number]['name'];
+export const SFX: readonly SfxName[] = SFX_LIBRARY.map((s) => s.name);
+/** Longest sound in public/sfx is ~9 s; audio sequences are sized to fit any of them. */
+export const SFX_MAX_SEC = 10;
 
 export type StyleProfile = {
   name: string;
@@ -135,9 +135,16 @@ export type EditSpec = {
   punches: {f: number; dur: number}[];
   callouts: {f: number; dur: number; text: string}[];
   transitions: {f: number}[];
-  sfx: {f: number; name: SfxName; volume: number}[];
+  /** src = where the sound came from (cut / punch / callout / plan), used by the effects list. */
+  sfx: {f: number; name: SfxName; volume: number; src?: 'cut' | 'punch' | 'callout' | 'plan'}[];
   music: {url: string; volume: number} | null;
   style: StyleProfile;
 };
 
-export type LabProps = {spec: EditSpec | null; specUrl?: string | null; base?: string};
+export type LabProps = {
+  spec: EditSpec | null;
+  specUrl?: string | null;
+  base?: string;
+  /** Replaces the project's registered motion scenes (used by the Lab's effects library demos). */
+  scenes?: MotionScene[];
+};

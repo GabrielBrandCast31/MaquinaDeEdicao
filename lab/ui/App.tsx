@@ -1,9 +1,10 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {api, fmtSec, type ProjectMeta, type State, type StyleMeta} from './api';
+import {LibraryView} from './LibraryView';
 import {ProjectView} from './ProjectView';
 import {StyleView} from './StyleView';
 
-type Sel = {kind: 'style' | 'project'; id: string} | null;
+type Sel = {kind: 'style' | 'project'; id: string} | {kind: 'library'} | null;
 
 const readPref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const writePref = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -18,11 +19,12 @@ export const App: React.FC = () => {
   const refresh = useCallback(async () => {
     const s = await api.get<State>('/api/state');
     setState(s);
-    setSelRaw((cur) => (cur && !(cur.kind === 'style' ? s.styles : s.projects).some((x) => x.id === cur.id) ? null : cur));
+    setSelRaw((cur) => (cur && cur.kind !== 'library' && !(cur.kind === 'style' ? s.styles : s.projects).some((x) => x.id === cur.id) ? null : cur));
   }, []);
-  useEffect(() => { refresh(); const t = setInterval(refresh, 4000); return () => clearInterval(t); }, [refresh]);
+  useEffect(() => { refresh(); const t = setInterval(refresh, 2000); return () => clearInterval(t); }, [refresh]);
 
   const isRunning = (kind: string, id: string) => state.running.some((r) => r.target === `${kind}:${id}`);
+  const openTarget = (target: string) => { const [kind, id] = target.split(':'); setSel({kind: kind as 'style' | 'project', id}); };
   const newStyle = async (blank = false) => {
     const s = await api.post<StyleMeta>('/api/styles', blank ? {name: 'Estilo em branco', blank: true} : {});
     await refresh();
@@ -56,11 +58,28 @@ export const App: React.FC = () => {
       </header>
 
       <aside className="sidebar">
+        <button className={`side-lib ${sel?.kind === 'library' ? 'side-on' : ''}`} onClick={() => setSel({kind: 'library'})}>
+          <span className="side-lib-icon" aria-hidden>♪</span>
+          <span><strong>Biblioteca de efeitos</strong><span className="side-meta">sons e efeitos visuais</span></span>
+        </button>
+        {state.running.length > 0 && (
+          <div className="side-sec side-tasks">
+            <div className="side-head"><span>Rodando agora · {state.running.length}</span></div>
+            {state.running.map((r) => (
+              <button key={r.id} className="task-item" onClick={() => openTarget(r.target)}>
+                <span className="task-top"><span className="side-name">{r.name}</span><span className="side-meta mono">{fmtSec((Date.now() - r.startedAt) / 1000)}</span></span>
+                <span className="side-meta">{r.step || 'iniciando…'}</span>
+                {r.waiting && <span className="task-wait">na fila: {r.waiting}</span>}
+                <div className={`bar ${r.progress == null ? 'bar-indeterminate' : ''}`}><div style={{width: `${Math.round((r.progress ?? 0.3) * 100)}%`}} /></div>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="side-sec">
           <div className="side-head"><span>Referências</span><button className="icon-btn" title="Nova referência" onClick={() => newStyle()}>+</button></div>
           {state.styles.length === 0 && <p className="side-empty">Envie um vídeo editado que você quer copiar.<br /><button className="link" onClick={() => newStyle(true)}>ou comece com o estilo padrão</button></p>}
           {state.styles.map((s) => (
-            <button key={s.id} className={`side-item ${sel?.id === s.id ? 'side-on' : ''}`} onClick={() => setSel({kind: 'style', id: s.id})}>
+            <button key={s.id} className={`side-item ${sel?.kind === 'style' && sel.id === s.id ? 'side-on' : ''}`} onClick={() => setSel({kind: 'style', id: s.id})}>
               <span className={`dot ${isRunning('style', s.id) ? 'dot-run' : s.analyzed ? 'dot-ok' : ''}`} />
               <span className="side-name">{s.name}</span>
               <span className="side-meta">{isRunning('style', s.id) ? 'analisando' : s.analyzed ? `${s.stats?.cutsPerMin ?? '–'} c/min` : s.source ? 'pronto p/ analisar' : 'sem vídeo'}</span>
@@ -71,7 +90,7 @@ export const App: React.FC = () => {
           <div className="side-head"><span>Projetos</span><button className="icon-btn" title="Novo projeto" onClick={newProject}>+</button></div>
           {state.projects.length === 0 && <p className="side-empty">Crie um projeto, envie o bruto e escolha um estilo.</p>}
           {state.projects.map((p) => (
-            <button key={p.id} className={`side-item ${sel?.id === p.id ? 'side-on' : ''}`} onClick={() => setSel({kind: 'project', id: p.id})}>
+            <button key={p.id} className={`side-item ${sel?.kind === 'project' && sel.id === p.id ? 'side-on' : ''}`} onClick={() => setSel({kind: 'project', id: p.id})}>
               <span className={`dot ${isRunning('project', p.id) ? 'dot-run' : p.built ? 'dot-ok' : ''}`} />
               <span className="side-name">{p.name}</span>
               <span className="side-meta">{isRunning('project', p.id) ? state.running.find((r) => r.target === `project:${p.id}`)?.step : p.built ? fmtSec(p.durationSec) : p.source ? 'pronto p/ gerar' : 'sem bruto'}</span>
@@ -83,6 +102,7 @@ export const App: React.FC = () => {
       <main className="main">
         {sel?.kind === 'style' && <StyleView key={sel.id} id={sel.id} model={model} language={language} onChanged={refresh} onOpenProject={(id) => setSel({kind: 'project', id})} />}
         {sel?.kind === 'project' && <ProjectView key={sel.id} id={sel.id} state={state} model={model} language={language} onChanged={refresh} />}
+        {sel?.kind === 'library' && <LibraryView />}
         {!sel && (
           <div className="welcome">
             <h1>Replique qualquer edição.</h1>
@@ -94,6 +114,7 @@ export const App: React.FC = () => {
             <div className="row-gap">
               <button className="btn btn-primary" onClick={() => newStyle()}>Enviar referência</button>
               <button className="btn" onClick={newProject}>Novo projeto</button>
+              <button className="btn btn-ghost" onClick={() => setSel({kind: 'library'})}>Ver efeitos</button>
             </div>
           </div>
         )}
